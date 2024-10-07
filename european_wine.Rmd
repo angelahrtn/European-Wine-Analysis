@@ -1,0 +1,656 @@
+---
+title: "AOL Data Mining"
+output: html_document
+date: "2023-06-12"
+---
+
+Steps Involved in Exploratory Data Analysis (EDA) and Predictive Modelling :
+A. Data Collection.
+B. Finding all Variables and Understanding Them.
+C. Cleaning the Dataset.
+D. Identify Correlated Variables. 
+E. Choosing the Right Statistical Methods. 
+F. Visualizing and Analyzing Results.
+
+```{r}
+# Library
+library(magrittr)  # to use piping %>%
+library(ggplot2)   # for ploting
+library(MASS)      # to calculate the pseudo-inverse of a matrix
+library(caret)     # to center our data by subtracting its mean
+library(reshape2)  # for data manipulation
+library(dplyr)
+library(corrplot)
+library(stringr)
+library(ltm)
+library(tidyr)
+library(randomForest)
+library(neuralnet)
+library(polycor)
+library(skimr)
+library(rsample)
+library(effectsize)
+library(tidyverse)
+library(broom)
+library(AICcmodavg)
+library(mlr)
+library(ISLR)
+
+```
+
+#A. Data Collection
+```{r}
+# Load the data
+data <- read.csv("winemag-data_first150k.csv")
+
+# Filter country for Europe
+data2 <- subset(data, country %in% c("Spain", "France", "Italy", "Bulgaria", "Portugal", "Greece", "Romania", "Germany", "Moldova", "Hungary", "Austria", "Croatia", "Slovenia", "Albania", "Bosnia and Herzegovina", "Cyprus", "Lithuania", "England", "Georgia", "Montenegro", "Luxembourg", "Slovakia", "Czech Republic", "Ukaraine"))
+# Read data
+data2
+```
+Filtering the for Europe country.
+--------------------------------------------------------------------------------------------------------
+#B. Finding all Variables and Understanding Them
+```{r}
+# show data
+head(data2)
+```
+
+```{r}
+summary(data2)
+```
+
+```{r}
+# Function for summary 
+basicSummary <- function(df, dgts) {
+  m <- ncol(df) # column
+  varNames <- colnames(df)
+  varType <- vector("character", m)
+  topLevel <- vector("character", m)
+  topCount <- vector("numeric", m)
+  missCount <- vector("numeric", m)
+  levels <- vector("numeric", m)
+  
+  for (i in 1:m) {
+    x <- df[,i]
+    varType[i] <- class(x)
+    xtab <- table(x, useNA = "ifany")
+    levels[i] <- length(xtab)
+    nums <- as.numeric(xtab)
+    maxnum <- max(nums)
+    topCount[i] <- maxnum
+    maxIndex <- which.max(nums)
+    lvls <- names(xtab)
+    topLevel[i] <- lvls[maxIndex]
+    missIndex <- which((is.na(x)) | (x == "") | (x == " "))
+    missCount[i] <- length(missIndex)
+  }
+  n <- nrow(df) # Rows
+  topFrac <- round(topCount/n, digits = dgts)
+  missFrac <- round(missCount/n, digits = dgts)
+  summaryFrame <- data.frame(variable = varNames, 
+                             type = varType, 
+                             levels = levels,
+                             topLevel = topLevel,
+                             topCount = topCount,
+                             topFrac = topFrac,
+                             missFreq = missCount,
+                             missFrac = missFrac)
+  return(summaryFrame)
+}
+```
+
+```{r}
+basicSummary(data2, 3)
+```
+According to the data above, we can 
+Berdasarkan data diatas, we discovered that :
+- Total data is 65377 rows.
+- There are 11 variables. 3 variables of type integer/float, while other variables are type string.
+- Mean of price is 36.63
+- Variable price has missing value (NA's) of 12973
+
+```{r}
+#  qqplot - right skewed
+qqnorm(data2$price, pch = 1, frame = FALSE)
+qqline(data2$price, col = "steelblue", lwd = 2)
+```
+From the graph above, there is a tendency for the observation data to be not on the line, so it can be concluded that the Price variable in the dataset does not follow a normal distribution.
+
+```{r}
+# qqplot - right skewed
+qqnorm(data2$points, pch = 1, frame = FALSE)
+qqline(data2$points, col = "red", lwd = 2)
+```
+From the graph above, there is a tendency for the observation data to be on the line, so it can be concluded that the Price variable in the dataset follows a normal distribution.
+
+
+--------------------------------------------------------------------------------------------------------
+#C. Cleaning the Dataset.
+```{r}
+# Find missing values(anomalie) in data price
+
+# Using summary function
+basicSummary(data2, 3)
+```
+From data above, there are several points that we can get, such as: 
+1. There are a total of 65377 wines in our set.
+
+2. Missing values percentage: 
+ - Designation = 25.20%
+ - Price = 19.8%
+ - Region_1 = 19.2%
+ - Region_2 = 100%
+
+
+Since The Price and Region_1 features are missing approximately 19.8%, and 19.2% of its values. We are guessing that all features are pretty important for Wine dataset, so we should probably drop only the missing values. 
+ 
+Beside that, Designation and Region_2 features both are missing approximately 25.20%, and 100% of its values. Since so much of the features is missing, it would be hard to fill in the missing values. We will probably crop these value from our dataset.
+
+```{r}
+#Untuk melihat unique values dari data region_1
+unique(data2$region_1)
+```
+Based on the data above, we can infer that Region_1 has missing values in the form of anomalous empty strings.
+
+```{r}
+unique(data2$designation)
+```
+Based on the data above, we can infer that designation has missing values in the form of anomalous empty strings.
+
+
+```{r}
+#show unique values from price
+unique(data2$price)
+```
+From the results above, we can observe that there are NA values in the Price variable. Therefore, we can conclude that Price has missing values in the form of anomalous missing values (NA).
+
+
+~~~ DATA CLEANING ~~~
+
+```{r}
+#Total variabel in dataset
+dim(data2)
+```
+From result above, we can see that there are 11 variables. 
+
+```{r}
+# Erase 'region_2' variable, because there are too many missing values
+data2 <- data2 %>% select(-region_2, -designation)
+print(data2)
+```
+
+
+```{r}
+# Erase description and X, because we do not need it.
+data2 <- data2 %>% select(-description, -X)
+data2
+```
+
+```{r}
+# Re-check total variables in data
+dim(data2)
+```
+It can be observed that the number of variables has decreased to 7 because the variables region_2, designation, description, and X have been removed.
+
+```{r}
+# Drop nan values in price
+data2 <- data2 %>% drop_na(price)
+print(data2)
+
+```
+```{r}
+# Check the missing values in Price variable
+sum(is.na(data2$price))
+```
+From the results above, it is evident that there are no missing values present anymore.
+```{r}
+# remove duplicate rows
+data2 <- data2[!duplicated(data2), ]
+data2
+```
+After removing duplicates from the data, we now have a total of 33,204 rows in our dataset.
+
+```{r}
+# Function untuk buat summary 
+basicSummary <- function(df, dgts) {
+  m <- ncol(df) # column
+  varNames <- colnames(df)
+  varType <- vector("character", m)
+  topLevel <- vector("character", m)
+  topCount <- vector("numeric", m)
+  missCount <- vector("numeric", m)
+  levels <- vector("numeric", m)
+  
+  for (i in 1:m) {
+    x <- df[,i]
+    varType[i] <- class(x)
+    xtab <- table(x, useNA = "ifany")
+    levels[i] <- length(xtab)
+    nums <- as.numeric(xtab)
+    maxnum <- max(nums)
+    topCount[i] <- maxnum
+    maxIndex <- which.max(nums)
+    lvls <- names(xtab)
+    topLevel[i] <- lvls[maxIndex]
+    missIndex <- which((is.na(x)) | (x == "") | (x == " "))
+    missCount[i] <- length(missIndex)
+  }
+  n <- nrow(df) # Rows
+  topFrac <- round(topCount/n, digits = dgts)
+  missFrac <- round(missCount/n, digits = dgts)
+  summaryFrame <- data.frame(variable = varNames, 
+                             type = varType, 
+                             levels = levels,
+                             topLevel = topLevel,
+                             topCount = topCount,
+                             topFrac = topFrac,
+                             missFreq = missCount,
+                             missFrac = missFrac)
+  return(summaryFrame)
+}
+```
+
+```{r}
+basicSummary(data2, 3)
+```
+
+
+```{r}
+# Finding Outliers variable price with boxplot
+boxplot(data2$price, ylab = 'price', ylim = c(3, 2400))
+```
+It can be concluded that the price variable contains extreme outliers.
+
+```{r}
+# identify outliers
+outliers <- boxplot(data2$price, plot = FALSE)$out
+
+# print the outliers
+outliers
+```
+Based on the data above, there are 1244 outliers out of 33204 observations.
+
+
+--------------------------------------------------------------------------------------------------------
+#D. Identify Correlated Variables.
+
+Dependent Variable : Points (ordinal)
+Independent Variables :
+- Variety (nominal)
+- Price (continuous)
+- Region (nominal)
+
+For searching the correlations, the method that we use are :
+
+point ~ variety = ANOVA
+point ~ region_1 = ANOVA
+point ~ price = spearman
+
+```{r}
+### Variety and Points
+
+#count the amount of each variety
+variety_amount <- table(data2$variety)
+
+#unique varieties with more than two occurrences
+varieties <- names(variety_amount[variety_amount > 1])
+
+#calculate the mean points for each variety
+mean_points <- aggregate(points ~ variety, data = data2, FUN = mean)
+
+#sort the mean points from biggest to smallest
+mean_points <- mean_points[order(-mean_points$points), ]
+print(mean_points)
+
+#using one-way ANOVA to compare mean points
+anova_result <- aov(points ~ variety, data = data2)
+p_values <- summary(anova_result)#$"Pr(>F)"[, "Pr(>F)"]
+
+print(p_values)
+
+```
+From the p-value, it can be determined that variety significantly influences the points.
+
+From the above data frame, it can be observed that the variety column represents different types of wines, each with its unique characteristics. The price column, on the other hand, represents the average price for each wine variety.
+
+Furthermore, it can be concluded that Roviello has the highest point rating among the wines, while Parraleta has the lowest point rating.
+```{r}
+### Region 1 and Points
+
+#count the amount of each region 1
+region1_amount <- table(data2$region_1)
+
+#unique varieties with more than two occurrences
+region1 <- names(region1_amount[region1_amount > 100])
+
+#calculate the mean points for each region 1
+mean_point <- aggregate(points ~ region_1, data = data2, FUN = mean)
+
+#sort the mean points from biggest to smallest
+mean_point <- mean_point[order(-mean_point$points), ]
+print(mean_point)
+
+#using one-way ANOVA to compare mean points
+anova_result <- aov(points ~ region_1, data = data2)
+p_values <- summary(anova_result)
+
+print(p_values)
+
+```
+The p-value indicates that region 1 has a significant influence on the points.
+
+From the above data frame, it can be observed that the region_1 column represents different regions, each with more than a hundred unique values. The points column represents the average points for each region.
+
+Furthermore, it can be concluded that Clos de Tart has the highest point rating among the regions, while Vin de Pays de Hauterive has the lowest point rating.
+
+
+```{r}
+# correlations between points and price using spearman method
+points <- data2$points
+price <- data2$price
+correlation_result <- cor(points, price, method = "spearman")
+correlation_result  <-data.frame(correlation_result)
+correlation_result
+
+```
+```{r}
+data3<-data2
+data3<-lapply(data3, function(x) if (is.double(x)) as.integer(x) else x)
+data3<-data.frame(data3)
+data3
+corrplot(cor(data3$points, data3[2:3]))
+
+```
+
+From the above results, it can be seen that the correlation coefficient is approaching 1, indicating a strong positive correlation between the two variables. This means that if the 'points' increase, the 'price' also tends to increase.
+
+This suggests that wines with higher points are generally associated with higher prices.
+
+--------------------------------------------------------------------------------------------------------
+#E. Choosing the Right Statistical Methods. 
+
+```{r}
+# Mann-whitney U-test
+
+#france_points <- wine_data$points[wine_data$country == "France"]
+#italy_points <- wine_data$points[wine_data$country == "Italy"]
+
+# Subset the data for wines from France and Italy
+france_prices <- data2$price[data2$country == "France"]
+italy_prices <- data2$price[data2$country == "Italy"]
+
+mann_whitney_result <- wilcox.test(france_prices, italy_prices)
+
+mann_whitney_result
+
+```
+From the above results, the following information can be derived:
+
+- The very small p-value (0.5367) is greater than the commonly used significance level (e.g. 0.05). This means that there is not enough statistical evidence to reject the null hypothesis.
+
+- Null Hypothesis: The null hypothesis in the Mann-Whitney U test states that there is no significant difference between the price distributions of wines from France and Italy.
+
+Conclusion:
+There is no significant difference between the price distributions of wines from France and Italy.
+
+```{r}
+# Chi-square
+
+# Subset the data for wines from France and Italy
+france_prices <- data2$price[data2$country == "France"]
+italy_prices <- data2$price[data2$country == "Italy"]
+
+# Create a contingency table
+contingency_table <- table(data2$price, data2$country)
+
+# Perform the chi-square test
+chi_sq_result <- chisq.test(contingency_table)
+
+# Print the results
+print(chi_sq_result)
+
+```
+From the above results, the following can be observed:
+
+- The p-value is very small, much smaller than the commonly used significance level (e.g., 0.05). This indicates that there is enough statistical evidence to reject the null hypothesis.
+
+- Null Hypothesis: The null hypothesis in the chi-squared test states that there is no significant relationship between the variables being studied.
+
+Conclusion: 
+There is a significant relationship between the price of wine and its country of origin, especially for wines produced in France and Italy.
+
+
+--------------------------------------------------------------------------------------------------------
+# CASE ANALYSIS
+
+Finding the best quality wine at the most affordable price in Europe
+
+```{r}
+# Filter the dataframe to select rows with the highest points
+highestpoint <- filter(data2, points == max(points))
+select(highestpoint, variety, country, region_1, price, points)
+
+
+# Sort the filtered dataframe by price in ascending order
+sort_price <- arrange(highestpoint, price)
+select(sort_price, variety, country, region_1, price, points)
+```
+After selecting the data with the highest points and sorting the prices in ascending order, it is found that the top 5 wine varieties with the best quality are from Italy and France. Among these 5 varieties, Red Blend is the wine variety with the most affordable price.
+
+```{r}
+# Filter the dataframe to select rows with the lowest price
+lowestprice <- filter(data2, price == min(points))
+select(lowestprice, variety, country, region_1, price, points, winery)
+
+# Sort the filtered dataframe by point in descending order
+sort_point <- arrange(lowestprice, desc(points))
+select(sort_point, variety, country, region_1, price, points, winery)
+
+# Top 6 lowest price with highest point
+print(head(select(sort_point, variety, country, region_1, price, points, winery)))
+
+```
+After selecting the data with the lowest prices and sorting the points in ascending order, it is found that the top 5 wine varieties with the best quality are from Italy, Portugal, France, and Austria. Among these 5 varieties, Sangiovese Grosso  and Port are the wine varieties with the highest points.
+
+
+--------------------------------------------------------------------------------------------------------
+#F. Visualizing and Analyzing Results.
+
+
+```{r}
+# Bivariate
+
+# Points each variety
+
+ggplot(data = subset(data2, points >= 97)) +
+  geom_point(aes(x = points, y = variety))
+```
+
+```{r}
+# Points each region 
+
+ggplot(data = subset(data2, points >= 97)) +
+  geom_point(aes(x = points, y = region_1))
+```
+```{r}
+top_wine_maker_countries <- table(data2$country)
+top_wine_maker_countries
+```
+
+```{r}
+# Sort the counts in descending order
+top_wine_maker_countries <- sort(top_wine_maker_countries, decreasing = TRUE)
+
+# Create the bar plot
+plot <- ggplot(data = as.data.frame(top_wine_maker_countries), aes(x = Var1, y = Freq)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Country", y = "Count", title = "Top wine makers by country") +
+  theme(axis.text.x = element_text(angle = 75, hjust = 1))
+
+# Display the plot
+print(plot)
+```
+Top 3 countries that produce wine the most are Italy, Francce, and Spain.
+```{r}
+# Calculate the average price of wines per country
+
+avg_price_by_country <- aggregate(price ~ country, data = data2, FUN = mean)
+avg_price_by_country
+
+# Create the plot
+p <- ggplot(data=avg_price_by_country, aes(x=country, y=price, group=1)) +
+  geom_line(color="red")+
+  geom_point()
+
+price <- p + theme(axis.text.x = element_text(angle = 90,hjust=1))
+
+price
+```
+
+```{r}
+# Calculate the average price of wines per country
+
+avg_price_by_country <- aggregate(price ~ points, data = data2, FUN = mean)
+avg_price_by_country
+
+# Create the plot
+p <- ggplot(data=avg_price_by_country, aes(x=points, y=price, group=1)) +
+  geom_line(color="red")+
+  geom_point()
+
+price <- p + theme(axis.text.x = element_text(angle = 90,hjust=1))
+
+price
+```
+
+```{r}
+# Create plot of price and country
+point<- ggplot(data = data2, aes(x = points, y = price, color = country)) +
+  geom_point() +
+  labs(title = "Scatterplot of Points vs Price", x = "Points", y = "Price") +
+  theme_minimal()
+point
+```
+
+
+#FINDING THE MOST BEST DEAL WINE (BY POINTS)
+```{r}
+# Filter the dataframe to select rows with the highest points
+highestpoint <- filter(data2, points == max(points))
+select(highestpoint, points, country, price, region_1, variety)
+
+# Sort the filtered dataframe by price in ascending order
+sort_price <- arrange(highestpoint, price)
+select(sort_price, points, country, price, region_1, variety)
+
+# Top 6 lowest price, highest point
+#print(head(select(sort_price, points, country, price, region_1, variety)))
+
+```
+After filtering only the maximum points(which is 100), 
+```{r}
+quality<- ggplot(data = highestpoint, aes(x = variety, y = price, colour=country)) +
+  geom_point() +
+  labs(title = "Price of best quality wine", x = "Variety", y = "Price") +
+  theme(axis.text.x = element_text(angle = 90,hjust=1))
+quality
+```
+
+```{r}
+#filter the dataframe to select rows with the lowest price
+lowestprice <- filter(data2, price == min(points))
+
+#sort the filtered dataframe by point in descending order
+sort_point <- arrange(lowestprice, desc(points))
+select(sort_point, points, country, price, region_1, variety)
+
+#delete duplicate data
+distinct_sort_point <- distinct(sort_point)
+
+#top 6 lowest price with highest point
+print(head(select(distinct_sort_point, points, country, price, region_1,variety)))
+```
+
+```{r}
+price<- ggplot(data = lowestprice, aes(x = variety, y = points, colour=country)) +
+  geom_point() +
+  labs(title = "Rating of lowest price wine", x = "Variety", y = "Point") +
+  theme(axis.text.x = element_text(angle = 90,hjust=1))
+price
+```
+
+
+
+--------------------------------------------------------------------------------------------------------
+# PREDICTIVE MODELING
+
+PREPROCESSING DATA
+```{r}
+# split data
+set.seed(123483)  # For reproducibility
+train_indices <- sample(1:nrow(data2), 0.7 * nrow(data2))
+train_data <- data2[train_indices, ]
+test_data <- data2[-train_indices, ]
+
+train_data
+test_data
+
+```
+Split the data into train_data and test_data with a ratio of 7:3, resulting in train_data having 23,652 rows and test_data having 10,137 rows
+
+
+```{r}
+#random forest
+set.seed(738)
+
+rf_model1 <- randomForest(points ~ ., data = train_data)
+
+rf_model1
+# importance(rf_model1)
+# 
+# varImpPlot(rf_model1,pch = 20 , col = "steelblue", main = "Model 1 variable importance plot")
+
+```
+
+```{r}
+summary(rf_model1)
+```
+
+```{r}
+result<-as.integer(predict(rf_model1, test_data))
+
+head(result)
+
+```
+```{r}
+confusionMatrix(as.factor(result), as.factor(test_data$points), positive = "True")
+```
+
+
+```{r}
+plot(predict(rf_model1), train_data$points,
+     xlab = "Predicted Values",
+     ylab = "Observed Values")
+abline(a = 0, b = 1, lwd=2,
+       col = "green")
+```
+All of the datas are scattered around the green line, it means that the prediction and actual value is accurate is low
+
+
+#PREDICTED MODEL USING LINEAR REGRESSION#
+```{r}
+modellm <- lm(points ~ price, data = train_data)
+summary(modellm)
+```
+
+```{r}
+confint(modellm, level=.95) 
+```
+
+```{r}
+summary(modellm)$r.squared
+```
+Accuracy of predictive modeling using linear regression is 21,6%
+
+
